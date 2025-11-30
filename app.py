@@ -83,7 +83,7 @@ def find_closest_name(target_name, name_list):
 def analyze_images_with_gemini(api_key, uploaded_files):
     genai.configure(api_key=api_key)
     # 動作確認済みのモデルを指定
-    model = genai.GenerativeModel('gemini-1.5-flash-001')
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
     all_data = []
     progress_bar = st.progress(0)
