@@ -10,16 +10,9 @@ import difflib
 # ==========================================
 st.set_page_config(page_title="同盟戦功表", layout="wide", initial_sidebar_state="collapsed")
 
-# カスタムCSS: 秦国カラー（赤・金・黒）とモバイル最適化
 st.markdown("""
 <style>
-    /* 全体の背景と文字色 */
-    .stApp {
-        background-color: #0e1117;
-        color: #f0f2f6;
-    }
-    
-    /* ヘッダー（金色の明朝体） */
+    .stApp { background-color: #0e1117; color: #f0f2f6; }
     h1, h2, h3 {
         font-family: 'Yu Mincho', 'MS PMincho', serif;
         color: #d4af37 !important;
@@ -27,8 +20,6 @@ st.markdown("""
         border-bottom: 2px solid #8b0000;
         padding-bottom: 10px;
     }
-    
-    /* ボタン（秦国の赤） - モバイルでタップしやすい大きさ */
     .stButton>button {
         background-color: #8b0000;
         color: white;
@@ -40,38 +31,16 @@ st.markdown("""
         font-size: 18px;
         transition: 0.3s;
     }
-    .stButton>button:hover {
-        background-color: #a50000;
-        border-color: #ffd700;
-        color: #fff;
-    }
-
-    /* サイドバーのデザイン */
-    [data-testid="stSidebar"] {
-        background-color: #1c1c1c;
-        border-right: 1px solid #d4af37;
-    }
-    
-    /* アップロードエリアのデザイン */
-    [data-testid="stFileUploader"] {
-        background-color: #1e1e1e;
-        border: 1px dashed #d4af37;
-        padding: 20px;
-        border-radius: 10px;
-    }
-    
-    /* スマホでの余白調整 */
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 5rem;
-    }
+    .stButton>button:hover { background-color: #a50000; border-color: #ffd700; color: #fff; }
+    [data-testid="stSidebar"] { background-color: #1c1c1c; border-right: 1px solid #d4af37; }
+    [data-testid="stFileUploader"] { background-color: #1e1e1e; border: 1px dashed #d4af37; padding: 20px; border-radius: 10px; }
+    .block-container { padding-top: 2rem; padding-bottom: 5rem; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
 # 2. 設定データ
 # ==========================================
-
 EVENT_STRUCTURE = {
     "討伐戦": ["秦国討伐戦", "趙国討伐戦", "魏国討伐戦", "合従軍討伐戦"],
     "争覇戦": ["争覇戦①", "争覇戦②", "争覇戦③"],
@@ -80,10 +49,10 @@ EVENT_STRUCTURE = {
 MONTHS = [f"{i}月" for i in range(1, 13)]
 
 # ==========================================
-# 3. 内部ロジック（モデル選択は隠蔽）
+# 3. 内部ロジック
 # ==========================================
 
-# APIキー読み込み（Secretsから）
+# APIキー読み込み
 try:
     api_key = st.secrets["GOOGLE_API_KEY"]
     genai.configure(api_key=api_key)
@@ -91,19 +60,40 @@ except:
     st.error("⚠️ エラー: APIキー設定なし")
     st.stop()
 
+# ★使えるモデルを自動で探す関数（重要！）
+def get_best_model():
+    try:
+        available_models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                name = m.name.replace("models/", "")
+                available_models.append(name)
+        
+        # 優先順位: flash -> pro -> その他
+        for model in available_models:
+            if "flash" in model and "latest" in model: return model # 最新Flash
+        for model in available_models:
+            if "flash" in model: return model # 普通のFlash
+        for model in available_models:
+            if "pro" in model: return model # Pro
+            
+        return "gemini-1.5-flash" # 見つからなければデフォルト
+    except:
+        return "gemini-1.5-flash"
+
 def find_closest_name(target_name, name_list):
     if not isinstance(target_name, str): return None
     matches = difflib.get_close_matches(target_name, name_list, n=1, cutoff=0.6)
     return matches[0] if matches else None
 
 def analyze_images_with_gemini(uploaded_files):
-    # ★モデルはここで固定（画面には出さない）
-    # ユーザー環境で成功した実績のあるFlashモデルを指定
-    model = genai.GenerativeModel('gemini-1.5-flash')
-
+    # 自動でベストなモデルを取得
+    model_name = get_best_model()
+    st.caption(f"※使用中の軍師(AI): {model_name}") # 確認用（小さく表示）
+    
+    model = genai.GenerativeModel(model_name)
     all_data = []
     
-    # スマホ向けに進捗バーを表示
     progress_text = "戦況分析中..."
     my_bar = st.progress(0, text=progress_text)
     
@@ -124,8 +114,9 @@ def analyze_images_with_gemini(uploaded_files):
             
             if isinstance(json_data, list):
                 all_data.extend(json_data)
-        except:
-            pass 
+        except Exception as e:
+            # ★エラーを隠さず表示する（重要）
+            st.error(f"【{file.name}】の解析に失敗: {e}")
         
         my_bar.progress((i + 1) / len(uploaded_files), text=f"戦況分析中... ({i+1}/{len(uploaded_files)}枚)")
 
@@ -148,16 +139,14 @@ def to_excel(df):
     return output.getvalue()
 
 # ==========================================
-# 4. 画面構築（モバイルファースト）
+# 4. 画面構築
 # ==========================================
 
 st.title("🏯 同盟戦功 集計本陣")
 
-# 名簿アップロード（サイドバーに隠す）
 with st.sidebar:
     st.header("📜 兵員名簿")
     master_file = st.file_uploader("名簿(Excel)を登録", type=['xlsx'])
-    
     master_df = None
     if master_file:
         try:
@@ -168,31 +157,21 @@ with st.sidebar:
         except:
             st.error("名簿読込失敗")
 
-# イベント選択（メイン画面上部に配置してスマホで選びやすく）
 col1, col2, col3 = st.columns([1, 1.5, 1.5])
-with col1:
-    selected_month = st.selectbox("時期", MONTHS)
-with col2:
-    event_category = st.selectbox("戦場区分", list(EVENT_STRUCTURE.keys()))
-with col3:
-    selected_event = st.selectbox("戦場名", EVENT_STRUCTURE[event_category])
+with col1: selected_month = st.selectbox("時期", MONTHS)
+with col2: event_category = st.selectbox("戦場区分", list(EVENT_STRUCTURE.keys()))
+with col3: selected_event = st.selectbox("戦場名", EVENT_STRUCTURE[event_category])
 
 st.markdown("---")
-
-# 画像アップロードエリア
 st.markdown("### 📷 戦果報告書（スクショ）")
-uploaded_files = st.file_uploader("ここに画像をアップロード", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True, label_visibility="collapsed")
+uploaded_files = st.file_uploader("画像をアップロード", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True, label_visibility="collapsed")
 
 if uploaded_files:
-    st.write(f"計 {len(uploaded_files)} 枚の報告書を受領")
-    
-    # 大きな赤いボタン
     if st.button("全軍、集計開始！！"):
         with st.spinner('早馬を走らせております...'):
             df_result = analyze_images_with_gemini(uploaded_files)
         
         if not df_result.empty:
-            # 名寄せ処理
             if master_df is not None:
                 master_names = master_df['名前'].tolist()
                 matched_names, matched_codes = [], []
@@ -208,11 +187,9 @@ if uploaded_files:
                 df_result.insert(1, '登録名', matched_names)
                 df_result.insert(2, '盟員コード', matched_codes)
 
-            # 結果表示（スマホ用にコンテナ幅いっぱいに）
             st.markdown("### 📊 集計結果")
             st.dataframe(df_result, use_container_width=True)
             
-            # ダウンロードボタン
             st.download_button(
                 label="📥 書簡(Excel)として保管",
                 data=to_excel(df_result),
@@ -220,4 +197,4 @@ if uploaded_files:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.error("報告書から文字を判読できませんでした。")
+            st.warning("⚠️ データを読み取れませんでした。上の赤いエラーメッセージを確認してください。")
